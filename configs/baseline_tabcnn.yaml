@@ -1,0 +1,29 @@
+# Condição: baseline TabCNN, áudio LIMPO, CQT, 6-fold CV.
+# Valores espelham os defaults reais de amt-tools/examples/papers/tabcnn.py.
+# Estes são o ponto de partida da Fase 0 (reproduzir o paper).
+
+condition: baseline_tabcnn
+model: TabCNN            # amt_tools.models.TabCNN
+features: CQT            # amt_tools.features.CQT
+dataset: GuitarSet
+
+# --- Áudio / features ---
+sample_rate: 22050
+hop_length: 512
+num_frames: 200         # frames por exemplo alimentado ao modelo
+num_frets: 19           # tools.GuitarProfile(num_frets=19)
+
+# --- Treino ---
+iterations: 2500
+checkpoints: 50         # nº de checkpoints de save/validação (0 desativa)
+batch_size: 30
+gpu_id: 0
+seed: 0                 # rodar múltiplas seeds quando der, p/ variabilidade
+
+# --- Dados / cache ---
+reset_data: false       # true força recomputar features (mudou parâmetro)
+
+# --- Persistência (preenchido em runtime por src.paths.P) ---
+# base_dir  -> P.guitarset_raw          (áudio + .jams brutos, no Drive)
+# save_loc  -> P.cache_local / gset     (cache de features/alvos, disco local)
+# root_dir  -> P.experiments / condition (checkpoints + logs sacred, no Drive)

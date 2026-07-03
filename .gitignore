@@ -1,0 +1,32 @@
+# Dados pesados NÃO vão para o GitHub — vivem no Drive.
+data/
+*.wav
+*.flac
+*.npz
+*.tar
+*.tar.gz
+*.zip
+
+# Frameworks clonados em runtime (não versionar aqui)
+amt-tools/
+guitar-transcription-continuous/
+guitar-transcription-with-inhibition/
+
+# Checkpoints / experimentos (Drive)
+experiments/
+results/checkpoints/
+results/tables/*.csv
+results/figures/*.png
+results/figures/*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# OS
+.DS_Store
