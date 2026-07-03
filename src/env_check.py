@@ -29,7 +29,7 @@ def check_versions():
         print(f"  {mod:<12}: {_ver(mod)}")
 
 
-def check_gpu():
+def check_gpu() -> bool:
     print("\n== GPU / CUDA ==")
     try:
         import torch
@@ -37,45 +37,62 @@ def check_gpu():
         print(f"  cuda disponível : {ok}")
         if ok:
             print(f"  device          : {torch.cuda.get_device_name(0)}")
+        else:
+            print("  !!! SEM GPU — troque em Runtime > Change runtime type > "
+                  "T4 GPU. Treinar em CPU é inviável.")
+        return ok
     except Exception as e:  # noqa: BLE001
         print(f"  torch indisponível: {e}")
+        return False
 
 
-def check_frameworks():
-    print("\n== Imports dos frameworks ==")
-    targets = [
+def _try_import(mod, attr):
+    try:
+        m = importlib.import_module(mod)
+        if attr:
+            getattr(m, attr)
+        print(f"  OK    {mod}" + (f".{attr}" if attr else ""))
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"  ERRO  {mod}: {type(e).__name__}: {e}")
+        return False
+
+
+def check_frameworks() -> bool:
+    """Retorna True se os essenciais da Fase 0 (TabCNN) importam.
+
+    O FretNet (guitar_transcription_continuous) é ADIADO para a Fase 4 e não
+    reprova o portão aqui — ele depende de `muda`, que não instala no 3.12.
+    """
+    print("\n== Imports ESSENCIAIS (Fase 0 — TabCNN) ==")
+    essential = [
         ("amt_tools", None),
         ("amt_tools.datasets", "GuitarSet"),
         ("amt_tools.models", "TabCNN"),
         ("amt_tools.features", "CQT"),
         ("guitar_transcription_inhibition", None),
-        ("guitar_transcription_continuous", None),
     ]
-    all_ok = True
-    for mod, attr in targets:
-        try:
-            m = importlib.import_module(mod)
-            if attr:
-                getattr(m, attr)
-            print(f"  OK    {mod}" + (f".{attr}" if attr else ""))
-        except Exception as e:  # noqa: BLE001
-            all_ok = False
-            print(f"  ERRO  {mod}: {type(e).__name__}: {e}")
-    return all_ok
+    essential_ok = all(_try_import(m, a) for m, a in essential)
+
+    print("\n== Imports ADIADOS (Fase 4 — FretNet, não reprova) ==")
+    _try_import("guitar_transcription_continuous", None)
+
+    return essential_ok
 
 
 def main():
     print(f"Python: {sys.version.split()[0]}\n")
     check_versions()
-    check_gpu()
-    ok = check_frameworks()
+    gpu_ok = check_gpu()
+    fw_ok = check_frameworks()
     print("\n" + ("=" * 50))
-    if ok:
-        print("AMBIENTE OK — pode seguir para a Fase 0.")
+    if fw_ok and gpu_ok:
+        print("AMBIENTE OK — pode seguir para a Fase 0 (rode o smoke test).")
+    elif fw_ok and not gpu_ok:
+        print("IMPORTS OK, mas SEM GPU — troque o runtime para GPU antes de treinar.")
     else:
-        print("AMBIENTE COM PROBLEMAS — ajuste requirements-colab.txt e/ou "
-              "considere o fallback condacolab (ver README).")
-    return 0 if ok else 1
+        print("IMPORTS ESSENCIAIS FALHARAM — verifique a instalação dos frameworks.")
+    return 0 if (fw_ok and gpu_ok) else 1
 
 
 if __name__ == "__main__":
