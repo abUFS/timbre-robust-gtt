@@ -32,6 +32,29 @@ import yaml
 import torch
 from torch.utils.data import DataLoader
 
+
+def _patch_torch_load():
+    """PyTorch 2.6+ usa weights_only=True por padrão e recusa despicklar objetos
+    (o amt-tools salva/carrega o MODELO inteiro via torch.save/torch.load). Como
+    os checkpoints são gerados por nós (fonte confiável), restauramos o padrão
+    antigo weights_only=False para os resumes/checkpoints funcionarem."""
+    import functools
+    if getattr(torch.load, "_tcc_patched", False):
+        return
+    _orig = torch.load
+
+    @functools.wraps(_orig)
+    def _load(*a, **k):
+        k.setdefault("weights_only", False)
+        return _orig(*a, **k)
+
+    _load._tcc_patched = True
+    torch.load = _load
+
+
+_patch_torch_load()
+
+
 # --- Torna os frameworks importáveis NO KERNEL ATUAL, sem depender do .pth da
 # instalação editável (só lido na inicialização do interpretador). Portátil:
 # usa TCC_FRAMEWORKS_ROOT (definido por env_setup) e cai para /content no Colab.
@@ -328,6 +351,7 @@ def run_condition(config_path, quick: bool = False, folds=None):
                           iterations=iterations,
                           checkpoints=checkpoints,
                           log_dir=str(model_dir),
+                          resume=not quick,   # smoke run começa limpo
                           val_set=gset_test,
                           estimator=estimator,
                           evaluator=evaluator)
