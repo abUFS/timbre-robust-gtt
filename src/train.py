@@ -32,17 +32,19 @@ import yaml
 import torch
 from torch.utils.data import DataLoader
 
-# --- Colab: garante que os frameworks clonados em /content sejam importáveis
-# NO KERNEL ATUAL, sem depender do .pth da instalação editável (que só é lido
-# na inicialização do interpretador). Sem isto, `from src.train import ...`
-# falha numa sessão onde o `pip install -e` rodou depois do kernel iniciar.
+# --- Torna os frameworks importáveis NO KERNEL ATUAL, sem depender do .pth da
+# instalação editável (só lido na inicialização do interpretador). Portátil:
+# usa TCC_FRAMEWORKS_ROOT (definido por env_setup) e cai para /content no Colab.
 import sys as _sys
 import os as _os
-for _p in ("/content/amt-tools",
-           "/content/guitar-transcription-with-inhibition",
-           "/content/guitar-transcription-continuous"):
-    if _os.path.isdir(_p) and _p not in _sys.path:
-        _sys.path.insert(0, _p)
+_roots = [_os.environ.get("TCC_FRAMEWORKS_ROOT", "/content")]
+_names = ("amt-tools", "guitar-transcription-with-inhibition",
+          "guitar-transcription-continuous")
+for _r in _roots:
+    for _n in _names:
+        _p = _os.path.join(_r, _n)
+        if _os.path.isdir(_p) and _p not in _sys.path:
+            _sys.path.insert(0, _p)
 import importlib as _importlib
 _importlib.invalidate_caches()
 
@@ -79,6 +81,35 @@ def _resolve_device(cfg) -> object:
         return int(cfg.get("gpu_id", 0))
     print("[train] AVISO: sem CUDA — caindo para CPU (lento).")
     return "cpu"
+
+
+def _cache_archive_name(cfg) -> str:
+    return f"cache_{cfg.get('condition', 'cache')}"
+
+
+def _pull_cache_if_available(cfg):
+    """Restaura o cache CQT do Drive (se existir), evitando recomputar após reset."""
+    from . import data_sync
+    name = _cache_archive_name(cfg)
+    if (P.archives / f"{name}.tar").exists():
+        print("[cache] cache CQT achado no Drive — restaurando para o local...")
+        try:
+            data_sync.pull_archive(name, P.local("cache"))
+        except Exception as e:  # noqa: BLE001
+            print(f"[cache] falha ao restaurar (segue recomputando): {e}")
+
+
+def _push_cache_once(cfg, save_loc):
+    """Arquiva o cache CQT no Drive uma única vez (após a 1ª geração completa)."""
+    from . import data_sync
+    name = _cache_archive_name(cfg)
+    if (P.archives / f"{name}.tar").exists():
+        return  # já arquivado
+    print("[cache] arquivando cache CQT no Drive (uma vez; ~1-2 min)...")
+    try:
+        data_sync.push_archive(name, save_loc)
+    except Exception as e:  # noqa: BLE001
+        print(f"[cache] falha ao arquivar (não crítico): {e}")
 
 
 def _build_components(cfg):
@@ -221,6 +252,10 @@ def run_condition(config_path, quick: bool = False, folds=None):
 
     profile, data_proc, estimator, evaluator = _build_components(cfg)
 
+    # Restaura o cache CQT do Drive, se já existir (evita recomputar após reset).
+    if not quick:
+        _pull_cache_if_available(cfg)
+
     fold_indices = folds if folds is not None else list(range(6))
     per_fold = []
 
@@ -267,6 +302,11 @@ def run_condition(config_path, quick: bool = False, folds=None):
                               profile=profile,
                               store_data=True,
                               save_loc=save_loc)
+
+        # Após a 1ª dobra, todas as 360 faixas já estão em cache: arquiva no Drive
+        # (antes do treino, para o cache estar salvo mesmo se houver reset).
+        if not quick:
+            _push_cache_once(cfg, save_loc)
 
         print("Inicializando modelo TabCNN...")
         model = TabCNN(dim_in=data_proc.get_feature_size(),

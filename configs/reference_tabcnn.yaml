@@ -1,0 +1,16 @@
+# Números PUBLICADOS do TabCNN no GuitarSet (validação cruzada de 6 dobras).
+# Fonte: Pedroza, Meza & Roman, DAFx24 (arXiv:2405.14679), Tabela 1, linha
+# "TabCNN [12]" — reprodução (via amt-tools) dos resultados de Wiggins & Kim
+# (ISMIR 2019). É a MESMA configuração que reproduzimos aqui
+# (amt-tools + audio_mono-mic + CQT + 6 dobras por músico), então é o alvo
+# correto para o critério de sucesso da Fase 0.
+source: "Pedroza et al., DAFx24 (arXiv:2405.14679), Tabela 1, linha superior"
+domain: guitarset_cv_in_domain
+metrics:
+  multipitch.precision: {mean: 0.900, std: 0.016}
+  multipitch.recall:    {mean: 0.764, std: 0.043}
+  multipitch.f1:        {mean: 0.826, std: 0.025}
+  tablature.precision:  {mean: 0.809, std: 0.029}
+  tablature.recall:     {mean: 0.696, std: 0.061}
+  tablature.f1:         {mean: 0.748, std: 0.047}
+  tablature.tdr:        {mean: 0.899, std: 0.033}

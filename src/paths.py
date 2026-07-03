@@ -1,23 +1,19 @@
 """
-paths.py — Configuração central de caminhos do projeto.
+paths.py — Configuração central de caminhos, com noção de PLATAFORMA.
 
-Esta é a ÚNICA fonte de verdade sobre onde as coisas moram. Toda a lógica
-que sobrevive (ou não) ao reset do Colab passa por aqui.
+Fonte única de verdade sobre onde as coisas moram, portátil entre Colab e local.
+A diferença entre os ambientes é só isto:
 
-Regra de ouro:
-  - CÓDIGO       -> GitHub (versionado, leve)          -> este repositório
-  - DADOS PESADOS-> Google Drive (persistente)         -> DRIVE_ROOT
-  - RUNTIME      -> disco local do Colab (rápido, efêmero) -> LOCAL_ROOT
+  COLAB : "armazém" = Google Drive (persistente); "bancada" = /content (efêmero,
+          apagado no reset). Precisa remontar tudo a cada sessão.
+  LOCAL : "armazém" e "bancada" ficam ambos no disco local (persistente). Nada
+          reseta; o setup é feito uma vez.
 
-O Drive é o "armazém": guarda áudio bruto, caches processados (em archives),
-checkpoints e resultados. O disco local (/content) é onde a gente REALMENTE
-trabalha, porque o Drive montado é lento para muitos arquivos pequenos.
+Selecione via TCC_PLATFORM = AUTO | COLAB | LOCAL (AUTO detecta o Colab).
+Sobrescreva raízes com TCC_DRIVE_ROOT / TCC_LOCAL_ROOT se quiser.
 
-Uso típico:
     from src.paths import P
     P.print_summary()
-    raw = P.guitarset_raw          # onde o GuitarSet cru vive (Drive)
-    cache = P.local("cache", "gset")  # onde o cache processado é usado (local)
 """
 
 import os
@@ -25,43 +21,50 @@ import sys
 from pathlib import Path
 
 
-def _in_colab() -> bool:
-    """Detecta se estamos rodando dentro do Google Colab."""
-    return "google.colab" in sys.modules or os.path.isdir("/content")
+def _detect_colab() -> bool:
+    return "google.colab" in sys.modules or os.path.isdir("/content/drive")
+
+
+def _resolve_platform(explicit=None) -> str:
+    plat = (explicit or os.environ.get("TCC_PLATFORM", "AUTO")).upper()
+    if plat == "AUTO":
+        return "COLAB" if _detect_colab() else "LOCAL"
+    return plat
 
 
 class _Paths:
     def __init__(self):
-        self.in_colab = _in_colab()
+        self.configure()
 
-        # ---- RAÍZES ----------------------------------------------------
-        # DRIVE_ROOT: persistente entre sessões. Sobrescreva com a env var
-        # TCC_DRIVE_ROOT se quiser outro local no seu Drive.
-        default_drive = "/content/drive/MyDrive/tcc-guitar" if self.in_colab \
-            else os.path.expanduser("~/tcc-guitar-drive")
+    def configure(self, platform=None):
+        """(Re)configura as raízes conforme a plataforma. Muta o singleton no
+        lugar, então referências `from .paths import P` continuam válidas."""
+        self.platform = _resolve_platform(platform)
+        self.in_colab = self.platform == "COLAB"
+
+        if self.platform == "COLAB":
+            default_drive = "/content/drive/MyDrive/tcc-guitar"
+            default_local = "/content/tcc-data"
+        else:  # LOCAL
+            base = os.path.expanduser("~/tcc-guitar-data")
+            default_drive = os.path.join(base, "store")   # "armazém"
+            default_local = os.path.join(base, "work")     # "bancada"
+
         self.drive_root = Path(os.environ.get("TCC_DRIVE_ROOT", default_drive))
-
-        # LOCAL_ROOT: disco rápido e EFÊMERO. É aqui que se roda de fato.
-        default_local = "/content/tcc-data" if self.in_colab \
-            else os.path.expanduser("~/tcc-guitar-local")
         self.local_root = Path(os.environ.get("TCC_LOCAL_ROOT", default_local))
-
-        # REPO_ROOT: raiz deste repositório (dois níveis acima deste arquivo).
         self.repo_root = Path(__file__).resolve().parents[1]
+        return self
 
-    # ---- HELPERS -------------------------------------------------------
+    # ---- helpers -------------------------------------------------------
     def drive(self, *parts) -> Path:
-        p = self.drive_root.joinpath(*parts)
-        return p
+        return self.drive_root.joinpath(*parts)
 
     def local(self, *parts) -> Path:
-        p = self.local_root.joinpath(*parts)
-        return p
+        return self.local_root.joinpath(*parts)
 
-    # ---- CAMINHOS NO DRIVE (persistentes) ------------------------------
+    # ---- caminhos persistentes ("armazém") -----------------------------
     @property
     def guitarset_raw(self) -> Path:
-        # Áudio (mono/mix) + anotações .jams originais do GuitarSet.
         return self.drive("raw", "guitarset")
 
     @property
@@ -74,37 +77,32 @@ class _Paths:
 
     @property
     def archives(self) -> Path:
-        # Caches processados empacotados como .tar (features CQT + alvos, FX etc.)
         return self.drive("archives")
 
     @property
     def experiments(self) -> Path:
-        # root_dir das experiências: checkpoints + logs do sacred, por condição.
         return self.drive("experiments")
 
     @property
     def results_drive(self) -> Path:
-        # Cópia persistente de tabelas/figuras (o repo também versiona as finais).
         return self.drive("results")
 
-    # ---- CAMINHOS LOCAIS (working dir, rápidos) ------------------------
+    # ---- caminhos de trabalho ("bancada") ------------------------------
     @property
     def cache_local(self) -> Path:
-        # save_loc do GuitarSet: onde features/alvos processados são lidos/escritos.
         return self.local("cache")
 
-    # ---- SETUP ---------------------------------------------------------
+    # ---- setup ---------------------------------------------------------
     def ensure_dirs(self):
-        """Cria as pastas persistentes no Drive se ainda não existirem."""
         for p in [self.guitarset_raw, self.egdb_raw, self.egset12_raw,
                   self.archives, self.experiments, self.results_drive,
                   self.cache_local]:
             p.mkdir(parents=True, exist_ok=True)
 
     def print_summary(self):
-        print(f"{'Colab?':<16}: {self.in_colab}")
-        print(f"{'DRIVE_ROOT':<16}: {self.drive_root}")
-        print(f"{'LOCAL_ROOT':<16}: {self.local_root}")
+        print(f"{'PLATFORM':<16}: {self.platform}")
+        print(f"{'DRIVE_ROOT':<16}: {self.drive_root}   (armazém)")
+        print(f"{'LOCAL_ROOT':<16}: {self.local_root}   (bancada)")
         print(f"{'REPO_ROOT':<16}: {self.repo_root}")
         print("-" * 60)
         print(f"{'guitarset_raw':<16}: {self.guitarset_raw}")
@@ -113,8 +111,12 @@ class _Paths:
         print(f"{'cache_local':<16}: {self.cache_local}")
 
 
-# Instância única importada em todo o projeto.
 P = _Paths()
+
+
+def configure(platform=None):
+    """Reconfigura o singleton global P para a plataforma dada."""
+    return P.configure(platform)
 
 
 if __name__ == "__main__":
