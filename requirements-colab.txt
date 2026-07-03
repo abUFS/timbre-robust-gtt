@@ -17,6 +17,8 @@
 
 pedalboard>=0.9.0     # Fases 1-2 (efeitos de áudio)
 PyYAML>=6.0           # leitura dos configs/*.yaml
+resampy>=0.4.3        # librosa usa p/ resample 44.1k->22.05k; opcional no librosa
+                      # moderno e AUSENTE no Colab, mas o amt-tools depende dele
 
 # Observação: muda (dep do FretNet/continuous) NÃO entra aqui — não instala no
 # 3.12 e só é necessária na Fase 4. Tratamos o FretNet separadamente lá.
