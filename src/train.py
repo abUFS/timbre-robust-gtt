@@ -32,6 +32,20 @@ import yaml
 import torch
 from torch.utils.data import DataLoader
 
+# --- Colab: garante que os frameworks clonados em /content sejam importáveis
+# NO KERNEL ATUAL, sem depender do .pth da instalação editável (que só é lido
+# na inicialização do interpretador). Sem isto, `from src.train import ...`
+# falha numa sessão onde o `pip install -e` rodou depois do kernel iniciar.
+import sys as _sys
+import os as _os
+for _p in ("/content/amt-tools",
+           "/content/guitar-transcription-with-inhibition",
+           "/content/guitar-transcription-continuous"):
+    if _os.path.isdir(_p) and _p not in _sys.path:
+        _sys.path.insert(0, _p)
+import importlib as _importlib
+_importlib.invalidate_caches()
+
 from amt_tools.datasets import GuitarSet
 from amt_tools.models import TabCNN
 from amt_tools.features import CQT
