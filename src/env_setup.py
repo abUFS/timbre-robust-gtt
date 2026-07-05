@@ -92,7 +92,13 @@ def setup(platform="AUTO", install=True, with_fretnet=False, frameworks_root=Non
         except Exception as e:  # noqa: BLE001
             print(f"[aviso] não consegui montar o Drive automaticamente: {e}")
 
-    # 2) Frameworks: instala se faltar (Colab: sempre pós-reset; Local: 1ª vez)
+    # 2) Injeta o sys.path ANTES de decidir instalar. Se a fonte dos frameworks
+    # já está presente (ex.: num Volume do Modal) e as deps já foram instaladas
+    # nesta sessão/container, os imports funcionam sem reinstalar — evitando
+    # reinstalações que re-resolvem versões e quebram deps (protobuf/smart_open).
+    _inject_path(frameworks_root)
+
+    # 3) Frameworks: instala só se ainda faltar de fato.
     need_install = install and not _frameworks_installed()
     repos = dict(FRAMEWORKS)
     if with_fretnet:
@@ -114,6 +120,7 @@ def setup(platform="AUTO", install=True, with_fretnet=False, frameworks_root=Non
                      "--no-deps")
             except Exception as e:  # noqa: BLE001
                 print(f"[aviso] FretNet adiado (Fase 4): {e}")
+        _inject_path(frameworks_root)   # repos recém-clonados
     else:
         if _frameworks_installed():
             print("Frameworks já disponíveis — pulando instalação.")

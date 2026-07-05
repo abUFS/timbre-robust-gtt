@@ -80,15 +80,19 @@ def compare(summary_path=None, ref_yaml=REF_YAML, tol=0.03):
                      r["mean"], r["std"], round(delta, 4),
                      "sim" if within_margin else ("~1sigma" if within_std else "nao")])
 
-    # salva CSV
+    # salva CSV (cópia local no repo — pode ser read-only sob mount do Modal)
     out_csv = P.repo_root / "results" / "tables" / "phase0_published_vs_reproduced.csv"
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["metric", "pub_mean", "pub_std",
-                    "repro_mean", "repro_std", "delta", "within_margin"])
-        w.writerows(rows)
-    # cópia persistente no Drive
+    try:
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["metric", "pub_mean", "pub_std",
+                        "repro_mean", "repro_std", "delta", "within_margin"])
+            w.writerows(rows)
+    except OSError as e:
+        print(f"[compare] cópia no repo pulada (read-only?): {e}")
+        out_csv = None
+    # cópia persistente no Drive/Volume (canônica)
     drive_csv = P.results_drive / "phase0_published_vs_reproduced.csv"
     drive_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(drive_csv, "w", newline="") as f:
@@ -115,7 +119,7 @@ def compare(summary_path=None, ref_yaml=REF_YAML, tol=0.03):
     print("\n" + ("FASE 0 REPRODUZIDA — pode seguir para a Fase 1."
                   if ok_all else
                   "Alguma métrica-chave fora da margem — investigar antes da Fase 1."))
-    print(f"tabela salva em: {out_csv}")
+    print(f"tabela salva em: {out_csv or drive_csv}")
     return rows
 
 
