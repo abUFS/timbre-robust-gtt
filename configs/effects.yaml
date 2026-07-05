@@ -1,0 +1,20 @@
+# effects.yaml — cada entrada é uma CONDIÇÃO de efeito NOMEADA (variante), com
+# um `type` (a classe do pedalboard) + os parâmetros. Adicionar uma versão nova
+# (ex.: outro EQ) = adicionar uma entrada aqui. O NOME vira o rótulo na tabela
+# de ablação e o sufixo do base_dir (guitarset_fx_<nome>).
+#
+# Tipos suportados: reverb, delay, chorus, eq (PeakFilter), distortion.
+variants:
+  reverb:      {type: reverb,     room_size: 0.5, wet_level: 0.3, dry_level: 0.7, width: 1.0}
+  delay:       {type: delay,      delay_seconds: 0.25, feedback: 0.3, mix: 0.3}
+  modulation:  {type: chorus,     rate_hz: 1.0, depth: 0.5, centre_delay_ms: 7.0, feedback: 0.0, mix: 0.5}
+  eq:          {type: eq,         cutoff_frequency_hz: 1000.0, gain_db: 6.0, q: 1.0}
+  distortion:  {type: distortion, drive_db: 25.0}
+
+# ---- Exemplos de variantes extras — descomente/edite para incluir na ablação:
+#  eq_low_boost:  {type: eq,         cutoff_frequency_hz: 300.0,  gain_db: 6.0,  q: 1.0}
+#  eq_high_boost: {type: eq,         cutoff_frequency_hz: 3500.0, gain_db: 6.0,  q: 1.0}
+#  eq_scoop:      {type: eq,         cutoff_frequency_hz: 800.0,  gain_db: -6.0, q: 0.7}
+#  dist_mild:     {type: distortion, drive_db: 12.0}
+#  dist_heavy:    {type: distortion, drive_db: 35.0}
+#  reverb_hall:   {type: reverb,     room_size: 0.9, wet_level: 0.5, dry_level: 0.5, width: 1.0}

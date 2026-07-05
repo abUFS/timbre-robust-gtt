@@ -1,52 +1,142 @@
 """
-apply_effects.py — Geração de augmentation por efeitos de áudio (Fases 1 e 2).
+apply_effects.py — Augmentation por efeitos de áudio (Fases 1 e 2).
 
-STUB: será preenchido na Fase 1. Deixado aqui com a estrutura pretendida e os
-parâmetros "moderados" a documentar no TCC (cada efeito em um nível fixo).
+Modelo de VARIANTES: cada efeito é uma condição nomeada em configs/effects.yaml,
+com um `type` (classe do pedalboard) + parâmetros. Para incluir mais versões
+(ex.: EQs diferentes), basta adicionar entradas no YAML — o código aqui itera
+sobre os nomes; nada precisa mudar.
 
-Fase 1: aplicar UM efeito por vez ao conjunto de TESTE do GuitarSet.
-Fase 2: aplicar efeitos aleatórios ao conjunto de TREINO (data augmentation).
+Fase 1: aplica UMA variante por vez e produz um `base_dir` completo por variante,
+que se pluga direto no GuitarSet do amt-tools (annotation/ + audio_mono-mic/).
 
-As anotações .jams NÃO mudam — o efeito altera o timbre, não as notas.
+    <fx_root>/guitarset_fx_<variante>/
+        annotation/                      -> link para os .jams limpos (mesmos)
+        audio_mono-mic/<track>_mic.wav   -> áudio com o efeito
+
+    from src import apply_effects as fx
+    fx.list_variants()                 # nomes disponíveis
+    fx.build_variant("distortion")     # gera o base_dir de uma variante
+    fx.build_all()                     # gera todas
 """
 
+import os
+import shutil
 from pathlib import Path
 
-# from pedalboard import (Pedalboard, Reverb, Delay, Chorus,
-#                         Distortion, PeakFilter, Gain)
-# from pedalboard.io import AudioFile
+import yaml
+from pedalboard import (Pedalboard, Reverb, Delay, Chorus, Distortion,
+                        PeakFilter)
+from pedalboard.io import AudioFile
 
+from .paths import P
+from . import download_guitarset
 
-# Parâmetros "moderados" fixos — DOCUMENTAR no TCC (reprodutibilidade).
-# TODO(Fase 1): fixar e justificar cada valor.
-EFFECT_PRESETS = {
-    "reverb":     {"room_size": 0.5, "wet_level": 0.3},
-    "delay":      {"delay_seconds": 0.25, "feedback": 0.3, "mix": 0.3},
-    "modulation": {"rate_hz": 1.0, "depth": 0.5, "mix": 0.5},   # chorus
-    "eq":         {"cutoff_frequency_hz": 1000, "gain_db": 6.0},
-    "distortion": {"drive_db": 25.0},  # caso à parte — o mais severo
+DEFAULT_CONFIG = "configs/effects.yaml"
+WAV_SUBDIR = "audio_mono-mic"
+WAV_SUFFIX = "_mic.wav"
+
+# type do YAML -> classe do pedalboard
+_TYPES = {
+    "reverb": Reverb,
+    "delay": Delay,
+    "chorus": Chorus,
+    "eq": PeakFilter,
+    "distortion": Distortion,
 }
 
 
-def apply_single_effect(in_wav: Path, out_wav: Path, effect: str,
-                        sample_rate: int = 22050) -> Path:
-    """Aplica um único efeito a um .wav e salva o resultado.
-
-    TODO(Fase 1): implementar com pedalboard usando EFFECT_PRESETS[effect].
-    """
-    raise NotImplementedError("Preencher na Fase 1.")
+def load_variants(config_path=DEFAULT_CONFIG) -> dict:
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+    return cfg["variants"]
 
 
-def build_test_fx_set(clean_dir: Path, out_root: Path, effects=None):
-    """Gera cópias do conjunto de TESTE, um efeito por vez (Fase 1)."""
-    raise NotImplementedError("Preencher na Fase 1.")
+def list_variants(config_path=DEFAULT_CONFIG):
+    return list(load_variants(config_path).keys())
 
 
-def build_train_fx_augmentation(clean_dir: Path, out_root: Path,
-                                seed: int = 0):
-    """Gera versões aumentadas do TREINO com efeitos aleatórios (Fase 2).
+def build_board(variant_def: dict) -> Pedalboard:
+    """Monta o Pedalboard de uma variante (dispatch pelo campo `type`)."""
+    params = dict(variant_def)
+    kind = params.pop("type")
+    if kind not in _TYPES:
+        raise ValueError(f"type de efeito desconhecido: {kind}")
+    return Pedalboard([_TYPES[kind](**params)])
 
-    Nota de design (decidido para Colab): gerar um conjunto FIXO com seed fixa
-    em vez de on-the-fly — reprodutível e não roda pedalboard a cada época.
-    """
-    raise NotImplementedError("Preencher na Fase 2.")
+
+def process_wav(in_path: Path, out_path: Path, board: Pedalboard):
+    """Aplica o efeito a um .wav mantendo a taxa de amostragem nativa."""
+    with AudioFile(str(in_path)) as f:
+        audio = f.read(f.frames)      # (canais, amostras)
+        sr = f.samplerate
+    processed = board(audio, sr)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with AudioFile(str(out_path), "w", sr, processed.shape[0]) as f:
+        f.write(processed)
+
+
+def _link_annotations(clean_base: Path, fx_base: Path):
+    src = clean_base / "annotation"
+    dst = fx_base / "annotation"
+    if dst.exists():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(src, dst, target_is_directory=True)
+    except OSError:
+        shutil.copytree(src, dst)
+
+
+def fx_base_dir(variant: str) -> Path:
+    """base_dir do GuitarSet para uma variante (na bancada local)."""
+    return P.local("raw", f"guitarset_fx_{variant}")
+
+
+def build_variant(variant: str, clean_base_dir=None, variants=None,
+                  tracks=None, overwrite=False) -> Path:
+    """Gera o base_dir completo de UMA variante. Idempotente por faixa."""
+    variants = variants or load_variants()
+    assert variant in variants, f"variante inválida: {variant}"
+    clean_base = Path(clean_base_dir or download_guitarset.local_base_dir())
+    fx_base = fx_base_dir(variant)
+
+    _link_annotations(clean_base, fx_base)
+    board = build_board(variants[variant])
+
+    clean_wav_dir = clean_base / WAV_SUBDIR
+    all_wavs = sorted(clean_wav_dir.glob(f"*{WAV_SUFFIX}"))
+    if tracks is not None:
+        keep = set(tracks)
+        all_wavs = [w for w in all_wavs if w.name[:-len(WAV_SUFFIX)] in keep]
+
+    out_dir = fx_base / WAV_SUBDIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    n_done = 0
+    for i, wav in enumerate(all_wavs):
+        out = out_dir / wav.name
+        if out.exists() and not overwrite:
+            continue
+        process_wav(wav, out, board)
+        n_done += 1
+        if (i + 1) % 60 == 0:
+            print(f"  [{variant}] {i + 1}/{len(all_wavs)} faixas...")
+    print(f"[fx] {variant}: {n_done} geradas ({len(all_wavs)} no total) -> {fx_base}")
+    return fx_base
+
+
+def build_all(variants=None, **kw):
+    names = list(variants) if variants else list_variants()
+    all_defs = load_variants()
+    return {n: build_variant(n, variants=all_defs, **kw) for n in names}
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--variant", default="all",
+                    help="nome da variante ou 'all'")
+    args = ap.parse_args()
+    if args.variant == "all":
+        build_all()
+    else:
+        build_variant(args.variant)
