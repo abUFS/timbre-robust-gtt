@@ -231,23 +231,94 @@ def _write_summary(root_dir: Path, condition: str, per_fold: list):
 # --------------------------------------------------------------------------- #
 # Loop principal
 # --------------------------------------------------------------------------- #
-def run_condition(config_path, quick: bool = False, folds=None):
+def profile_fold(config_path, n_batches: int = 12):
+    """Diagnóstico: mede tempo de DADOS vs COMPUTE por lote, e lotes/época.
+
+    Revela se os ~11s/it são de carregar o lote (dados) ou do passo do modelo
+    (forward+backward). Roda na dobra 0. Se o cache não estiver arquivado no
+    Volume, gera o CQT antes (uma vez).
+    """
+    import time
+    cfg = load_config(config_path)
+    device = _resolve_device(cfg)
+    base_dir = str(download_guitarset.local_base_dir())
+    save_loc = str(P.local("cache", cfg.get("condition", "baseline_tabcnn")))
+    _pull_cache_if_available(cfg)
+
+    profile, data_proc, estimator, evaluator = _build_components(cfg)
+    train_splits = GuitarSet.available_splits()
+    train_splits.pop(0)  # testa no músico 0 -> treina nos demais
+
+    print("Carregando partição de treino (gera/reusa cache)...")
+    gset = GuitarSet(base_dir=base_dir, splits=train_splits,
+                     hop_length=cfg["hop_length"], sample_rate=cfg["sample_rate"],
+                     num_frames=cfg["num_frames"], data_proc=data_proc,
+                     profile=profile, store_data=True, save_loc=save_loc)
+    loader = DataLoader(gset, batch_size=cfg["batch_size"], shuffle=True,
+                        num_workers=cfg.get("num_workers", 0), drop_last=True)
+    print(f"[prof] lotes por época (len loader): {len(loader)}")
+    print(f"[prof] batch_size={cfg['batch_size']}  num_frames={cfg['num_frames']}"
+          f"  num_workers={cfg.get('num_workers', 0)}")
+    _push_cache_once(cfg, save_loc)   # arquiva o cache p/ próximos testes serem rápidos
+
+    model = TabCNN(dim_in=data_proc.get_feature_size(), profile=profile,
+                   in_channels=data_proc.get_num_channels(), device=device)
+    model.change_device()
+    model.train()
+    optimizer = torch.optim.Adadelta(model.parameters(), lr=1.0)
+    cuda = torch.cuda.is_available()
+
+    def sync():
+        if cuda:
+            torch.cuda.synchronize()
+
+    it = iter(loader)
+    for i in range(n_batches):
+        t0 = time.time()
+        try:
+            batch = next(it)
+        except StopIteration:
+            it = iter(loader)
+            batch = next(it)
+        sync(); t1 = time.time()
+        step_ms = None
+        try:
+            model.run_on_batch(batch)   # forward (a assinatura aceita só o batch)
+            sync(); step_ms = (time.time() - t1) * 1000
+        except Exception as e:  # noqa: BLE001
+            if i == 0:
+                print(f"[prof] run_on_batch falhou ({type(e).__name__}: {e}); "
+                      f"medindo só o tempo de dados.")
+        data_ms = (t1 - t0) * 1000
+        msg = f"[prof] lote {i:>2}: dados={data_ms:7.1f}ms"
+        if step_ms is not None:
+            msg += f"  compute={step_ms:7.1f}ms"
+        if i == 0:
+            msg += "  (1º lote inclui aquecimento; ignore)"
+        print(msg)
+    print("[prof] fim.")
+
+
+def run_condition(config_path, quick: bool = False, folds=None,
+                  checkpoints=None, iterations=None):
     """Roda a validação cruzada de 6 dobras para uma condição do YAML.
 
-    quick=True  -> smoke run: 1 dobra, poucas iterações, sem checkpoints, em
-                   diretório separado (…__quick). Serve para validar o pipeline
-                   ponta-a-ponta em minutos antes da rodada completa.
-    folds       -> lista de índices [0..5] para rodar só algumas dobras.
+    quick=True   -> smoke run: 1 dobra, poucas iterações, sem checkpoints.
+    folds        -> lista de índices [0..5] para rodar só algumas dobras.
+    checkpoints  -> sobrescreve cfg['checkpoints'] (nº de validações/saves ao
+                    longo do treino). MENOS checkpoints = muito mais rápido
+                    (a validação é o gargalo), ao custo de resume mais grosso.
+    iterations   -> sobrescreve cfg['iterations'] (útil p/ cronometrar).
     """
     cfg = load_config(config_path)
     condition = cfg.get("condition", Path(config_path).stem)
 
-    # --- parâmetros (com override do modo quick) ---
+    # --- parâmetros (com overrides) ---
     sample_rate = cfg["sample_rate"]
     hop_length = cfg["hop_length"]
     num_frames = cfg["num_frames"]
-    iterations = cfg["iterations"]
-    checkpoints = cfg["checkpoints"]
+    iterations = iterations if iterations is not None else cfg["iterations"]
+    checkpoints = checkpoints if checkpoints is not None else cfg["checkpoints"]
     batch_size = cfg["batch_size"]
     seed = cfg.get("seed", 0)
     reset_data = cfg.get("reset_data", False)
@@ -307,12 +378,14 @@ def run_condition(config_path, quick: bool = False, folds=None):
                                data_proc=data_proc,
                                profile=profile,
                                reset_data=(reset_data and k == fold_indices[0]),
+                               store_data=True,   # mantém features em memória
                                save_loc=save_loc)
 
         train_loader = DataLoader(dataset=gset_train,
                                   batch_size=batch_size,
                                   shuffle=True,
-                                  num_workers=0,
+                                  num_workers=cfg.get("num_workers", 0),
+                                  pin_memory=cfg.get("num_workers", 0) > 0,
                                   drop_last=True)
 
         print("Carregando partição de teste...")
@@ -338,6 +411,11 @@ def run_condition(config_path, quick: bool = False, folds=None):
                        device=device)
         model.change_device()
         model.train()
+        # Diagnóstico decisivo: onde o modelo REALMENTE está (cpu vs cuda).
+        try:
+            print("[diag] device do modelo:", next(model.parameters()).device)
+        except StopIteration:
+            pass
 
         optimizer = torch.optim.Adadelta(model.parameters(), lr=1.0)
 

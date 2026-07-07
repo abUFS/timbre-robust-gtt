@@ -17,12 +17,13 @@ Editou o código? Só salvar e rodar de novo — o mount pega a versão nova. N�
 precisa de prepare nem rebuild. Só mudou dependência? Aí a Image reconstrói.
 """
 
+import os
 import pathlib
 import modal
 
 APP_NAME = "tcc-guitar"
 VOLUME_NAME = "tcc"          # <- EXATAMENTE o nome do seu Volume (case-sensitive!)
-GPU = "T4"                   # "T4" (barato) | "A10G" | "A100" (rápido/caro)
+GPU = os.environ.get("TCC_GPU", "A10G")   # T4 | A10G | A100 — via env: TCC_GPU=A100
 
 LOCAL_PROJECT = pathlib.Path(__file__).parent   # raiz do repo (onde está este arquivo)
 PROJECT_DIR = "/root/project"                    # onde o código é montado no container
@@ -113,6 +114,18 @@ def train_fold(fold: int, config: str = "configs/baseline_tabcnn.yaml",
     vol.commit()   # persiste checkpoints + cache archive + fold-CSV desta dobra
 
 
+@app.function(gpu=GPU, volumes={VOL_PATH: vol}, timeout=60 * 60)
+def profile(config: str = "configs/baseline_tabcnn.yaml"):
+    _env()
+    import torch
+    print("CUDA:", torch.cuda.is_available(),
+          torch.cuda.get_device_name(0) if torch.cuda.is_available() else "")
+    _ensure_data()
+    from src.train import profile_fold
+    profile_fold(config)
+    vol.commit()
+
+
 @app.function(volumes={VOL_PATH: vol}, timeout=60 * 60)
 def finalize(config: str = "configs/baseline_tabcnn.yaml"):
     _env()
@@ -141,5 +154,7 @@ def main(action: str = "smoke",
         finalize.remote(config)
     elif action == "finalize":
         finalize.remote(config)
+    elif action == "profile":
+        profile.remote(config)
     else:
-        print("ações: prepare | smoke | train | finalize")
+        print("ações: prepare | smoke | train | finalize | profile")

@@ -20,6 +20,8 @@ batch_size: 30
 gpu_id: 0
 seed: 0                 # rodar múltiplas seeds quando der, p/ variabilidade
 
+num_workers: 0
+
 # --- Dados / cache ---
 reset_data: false       # true força recomputar features (mudou parâmetro)
 
